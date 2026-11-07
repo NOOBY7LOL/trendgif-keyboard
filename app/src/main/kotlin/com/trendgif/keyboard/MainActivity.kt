@@ -19,10 +19,18 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    private fun label(text: String, size: Float = 16f): TextView {
+        val t = TextView(this)
+        t.text = text
+        t.textSize = size
+        t.setPadding(0, dp(14), 0, dp(4))
+        return t
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("trendgif", MODE_PRIVATE)
-        var prov = prefs.getString("provider", "klipy") ?: "klipy"
+        var prov = prefs.getString("provider", "giphy") ?: "giphy"
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
@@ -33,25 +41,22 @@ class MainActivity : Activity() {
         title.textSize = 26f
         col.addView(title)
 
-        val info = TextView(this)
-        info.text = "Shows what's trending right now and sends it as a WhatsApp-style GIF.\n\n" +
-            "Step 1: Pick a GIF source and paste its free API key.\n" +
-            "  Klipy: partner.klipy.com (made by the ex-Tenor team)\n" +
-            "  Giphy: developers.giphy.com (Create an App -> API)\n" +
-            "Step 2: Enable the keyboard.\n" +
-            "Step 3: Switch to it, open WhatsApp, tap the GIF key."
-        info.setPadding(0, dp(12), 0, dp(12))
-        col.addView(info)
+        col.addView(label(
+            "Trending GIFs sent as WhatsApp-style GIFs.\n" +
+                "Drag the little bar at the top of the keyboard to make it taller or shorter.", 14f
+        ))
 
+        // ---- source + key ----
+        col.addView(label("1. GIF source and key"))
         val group = RadioGroup(this)
-        val rk = RadioButton(this)
-        rk.id = 1
-        rk.text = "Klipy (closest to Tenor, recommended)"
         val rg = RadioButton(this)
-        rg.id = 2
-        rg.text = "Giphy"
-        group.addView(rk)
+        rg.id = 1
+        rg.text = "Giphy (recommended: lets me hide old GIFs)"
+        val rk = RadioButton(this)
+        rk.id = 2
+        rk.text = "Klipy (no upload dates, so can't filter by age)"
         group.addView(rg)
+        group.addView(rk)
         col.addView(group)
 
         val keyBox = EditText(this)
@@ -60,13 +65,13 @@ class MainActivity : Activity() {
 
         fun keyName() = if (prov == "giphy") "giphy_key" else "klipy_key"
         fun refresh() {
-            keyBox.hint = if (prov == "giphy") "Giphy API key" else "Klipy API key"
+            keyBox.hint = if (prov == "giphy") "Giphy API key (developers.giphy.com)" else "Klipy API key (partner.klipy.com)"
             keyBox.setText(prefs.getString(keyName(), ""))
         }
-        group.check(if (prov == "giphy") 2 else 1)
+        group.check(if (prov == "giphy") 1 else 2)
         refresh()
         group.setOnCheckedChangeListener { _, id ->
-            prov = if (id == 2) "giphy" else "klipy"
+            prov = if (id == 2) "klipy" else "giphy"
             prefs.edit().putString("provider", prov).apply()
             refresh()
         }
@@ -82,6 +87,25 @@ class MainActivity : Activity() {
         }
         col.addView(save)
 
+        // ---- recency ----
+        col.addView(label("2. Only show GIFs newer than (Giphy)"))
+        val ages = listOf(30 to "Last 30 days", 60 to "Last 2 months", 180 to "Last 6 months", 0 to "Any age")
+        val ageGroup = RadioGroup(this)
+        ages.forEachIndexed { i, pair ->
+            val rb = RadioButton(this)
+            rb.id = 100 + i
+            rb.text = pair.second
+            ageGroup.addView(rb)
+        }
+        val cur = prefs.getInt("max_age_days", 60)
+        ageGroup.check(100 + ages.indexOfFirst { it.first == cur }.coerceAtLeast(1))
+        ageGroup.setOnCheckedChangeListener { _, id ->
+            prefs.edit().putInt("max_age_days", ages[id - 100].first).apply()
+        }
+        col.addView(ageGroup)
+
+        // ---- enable ----
+        col.addView(label("3. Turn it on"))
         val enable = Button(this)
         enable.text = "Enable keyboard"
         enable.setOnClickListener { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
@@ -93,6 +117,11 @@ class MainActivity : Activity() {
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
         }
         col.addView(pick)
+
+        col.addView(label(
+            "Word suggestions use your phone's spell checker. If none show up, turn on " +
+                "Settings > General management > Keyboard list and default > Spell check.", 13f
+        ))
 
         val scroll = ScrollView(this)
         scroll.addView(col, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
