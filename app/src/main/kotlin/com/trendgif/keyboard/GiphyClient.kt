@@ -6,35 +6,28 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
 
 data class GifItem(
     val id: String,
     val previewUrl: String,
     val mp4Url: String?,
-    val gifUrl: String,
-    val ts: Long = 0L // upload time in ms (0 = unknown)
+    val gifUrl: String
 )
-
-// rawCount = how many results the server sent (used for paging), items = after the "recent only" filter
-data class GifPage(val items: List<GifItem>, val rawCount: Int)
 
 object GiphyClient {
     private const val BASE = "https://api.giphy.com/v1/gifs"
 
-    fun trending(key: String, offset: Int, maxAgeDays: Int, limit: Int = 50): GifPage =
-        fetch("$BASE/trending?api_key=$key&limit=$limit&offset=$offset&rating=pg-13&bundle=messaging_non_clips", maxAgeDays)
+    // "Trending" = what people are sharing right now (updates through the day)
+    fun trending(key: String, offset: Int, limit: Int = 30): List<GifItem> =
+        fetch("$BASE/trending?api_key=$key&limit=$limit&offset=$offset&rating=pg-13&bundle=messaging_non_clips")
 
-    fun search(key: String, q: String, offset: Int, maxAgeDays: Int, limit: Int = 50): GifPage =
+    fun search(key: String, q: String, offset: Int, limit: Int = 30): List<GifItem> =
         fetch(
             "$BASE/search?api_key=$key&q=${URLEncoder.encode(q, "UTF-8")}" +
-                "&limit=$limit&offset=$offset&rating=pg-13&lang=en&bundle=messaging_non_clips",
-            maxAgeDays
+                "&limit=$limit&offset=$offset&rating=pg-13&lang=en&bundle=messaging_non_clips"
         )
 
-    private fun fetch(url: String, maxAgeDays: Int): GifPage {
+    private fun fetch(url: String): List<GifItem> {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 10000
         c.readTimeout = 15000
@@ -42,24 +35,10 @@ object GiphyClient {
             if (c.responseCode != 200) throw IOException("HTTP ${c.responseCode}")
             val body = c.inputStream.bufferedReader().use { it.readText() }
             val arr = JSONObject(body).getJSONArray("data")
-
-            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-            fmt.timeZone = TimeZone.getTimeZone("UTC")
-            val cutoff = if (maxAgeDays > 0) System.currentTimeMillis() - maxAgeDays * 86_400_000L else 0L
-
             val out = ArrayList<GifItem>()
             for (i in 0 until arr.length()) {
                 val g = arr.getJSONObject(i)
                 val im = g.optJSONObject("images") ?: continue
-
-                // skip old GIFs: Giphy tells us when each one was uploaded
-                val ts = try {
-                    fmt.parse(g.optString("import_datetime"))?.time ?: 0L
-                } catch (e: Exception) {
-                    0L
-                }
-                if (cutoff > 0 && ts > 0 && ts < cutoff) continue
-
                 val orig = im.optJSONObject("original")
                 val fh = im.optJSONObject("fixed_height")
 
@@ -67,15 +46,15 @@ object GiphyClient {
                     .ifBlank { im.optJSONObject("fixed_width_small")?.optString("url").orEmpty() }
                 val gif = fh?.optString("url").orEmpty()
 
+                // Prefer the sharper MP4 if it is small enough, else the 200px-high one
                 val origSize = orig?.optString("mp4_size")?.toLongOrNull() ?: Long.MAX_VALUE
                 val mp4 = (if (origSize <= 2_500_000L) orig?.optString("mp4") else null).orEmpty()
                     .ifBlank { fh?.optString("mp4").orEmpty() }
 
                 if (preview.isBlank() || gif.isBlank()) continue
-                out.add(GifItem(g.getString("id"), preview, mp4.ifBlank { null }, gif, ts))
+                out.add(GifItem(g.getString("id"), preview, mp4.ifBlank { null }, gif))
             }
-            out.sortByDescending { it.ts } // newest first
-            return GifPage(out, arr.length())
+            return out
         } finally {
             c.disconnect()
         }
